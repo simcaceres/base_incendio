@@ -1,0 +1,107 @@
+name: prevencion-incendios-valparaiso
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: incendios-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-incendios}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-incendios123}
+      POSTGRES_DB: ${POSTGRES_DB:-prevencion_incendios}
+    volumes:
+      - ./database/init/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-incendios} -d ${POSTGRES_DB:-prevencion_incendios}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - incendios-net
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    container_name: incendios-api
+    ports:
+      # Por defecto 8000:8000; API_HOST_PORT permite evitar colisiones locales.
+      - "${API_HOST_PORT:-8000}:8000"
+    environment:
+      API_KEY: ${API_KEY:-dev-api-key-123}
+      DB_HOST: db
+      DB_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-incendios}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-incendios123}
+      POSTGRES_DB: ${POSTGRES_DB:-prevencion_incendios}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-incendios}:${POSTGRES_PASSWORD:-incendios123}@db:5432/${POSTGRES_DB:-prevencion_incendios}
+      STATIC_DIR: /app/frontend
+    volumes:
+      # El frontend lo genera otro agente; se monta en vivo (no va en la imagen).
+      - ./frontend:/app/frontend:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - incendios-net
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: incendios-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - incendios-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: incendios-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - incendios-net
+    restart: unless-stopped
+
+networks:
+  incendios-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  prometheus-data:
+  grafana-data:

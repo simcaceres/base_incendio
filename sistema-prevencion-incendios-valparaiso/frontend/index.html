@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Prototipo de sistema de apoyo a la prevención y clasificación de riesgo de incendios forestales en Valparaíso, Chile.">
+  <title>Prevención Incendios Forestales · Valparaíso</title>
+
+  <!-- Leaflet 1.9.4 (CDN) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+
+  <style>
+    /* ============================================================
+       Design tokens — tema oscuro / moderno, acento "ember"
+       ============================================================ */
+    :root {
+      --bg: #0b1120;
+      --bg-panel: #131c31;
+      --bg-panel-2: #0f172a;
+      --border: #263349;
+      --text: #e5edf8;
+      --text-muted: #94a3b8;
+      --accent: #f97316;
+      --accent-strong: #ea580c;
+      --riesgo-alto: #dc2626;
+      --riesgo-medio: #f59e0b;
+      --riesgo-bajo: #16a34a;
+      --error-bg: #451a1a;
+      --error-border: #7f1d1d;
+      --radius: 12px;
+      --gap: 1rem;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: radial-gradient(1200px 500px at 80% -10%, #1e293b 0%, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    a { color: var(--accent); }
+
+    :focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px; height: 1px;
+      padding: 0; margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    /* ---------- Header ---------- */
+    .site-header {
+      padding: 1.25rem clamp(1rem, 4vw, 2.5rem) 0.75rem;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(249, 115, 22, 0.08), transparent);
+    }
+
+    .site-header h1 {
+      margin: 0 0 0.25rem;
+      font-size: clamp(1.15rem, 2.6vw, 1.6rem);
+      line-height: 1.25;
+      letter-spacing: -0.01em;
+    }
+
+    .site-header .subtitulo {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    /* ---------- Layout principal ---------- */
+    main.contenedor {
+      flex: 1;
+      width: 100%;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: var(--gap) clamp(1rem, 4vw, 2.5rem) 2rem;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: var(--gap);
+      align-items: start;
+    }
+
+    @media (min-width: 1024px) {
+      main.contenedor {
+        grid-template-columns: 1.4fr 1fr;
+        gap: 1.25rem;
+      }
+    }
+
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.1rem 1.2rem 1.25rem;
+    }
+
+    .panel h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1.05rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    /* ---------- Mapa ---------- */
+    #mapa {
+      width: 100%;
+      height: 340px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-panel-2);
+      z-index: 1;
+    }
+
+    @media (min-width: 1024px) {
+      #mapa { height: 620px; }
+    }
+
+    /* Tiles OpenStreetMap adaptados al tema oscuro */
+    .leaflet-tile-pane {
+      filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.55);
+    }
+
+    .leaflet-container a.leaflet-popup-close-button { color: #cbd5e1; }
+
+    .popup-riesgo { font-size: 0.9rem; line-height: 1.45; }
+    .popup-riesgo strong { display: block; margin-bottom: 0.2rem; }
+    .popup-riesgo .nivel { font-weight: 700; }
+
+    .mapa-ayuda {
+      margin: 0.5rem 0 0;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+    }
+
+    /* ---------- Formulario ---------- */
+    fieldset {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin: 0 0 1rem;
+      padding: 0.75rem 0.9rem 0.9rem;
+    }
+
+    legend {
+      padding: 0 0.4rem;
+      font-weight: 600;
+      font-size: 0.88rem;
+      color: var(--accent);
+    }
+
+    .campos {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.7rem;
+    }
+
+    .campo { display: flex; flex-direction: column; gap: 0.25rem; }
+    .campo.ancho { grid-column: 1 / -1; }
+
+    label {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    input[type="number"], input[type="password"] {
+      width: 100%;
+      min-height: 44px;
+      padding: 0.5rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-panel-2);
+      color: var(--text);
+      font-size: 1rem;
+    }
+
+    input[type="number"]:focus, input[type="password"]:focus {
+      border-color: var(--accent);
+    }
+
+    /* ---------- Botones ---------- */
+    .acciones {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-top: 0.25rem;
+    }
+
+    button {
+      min-height: 44px;
+      padding: 0.55rem 1.1rem;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      font-size: 0.98rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.05s ease;
+    }
+
+    button:active { transform: translateY(1px); }
+
+    .btn-primario {
+      background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+      color: #1a0b02;
+      flex: 1 1 180px;
+    }
+
+    .btn-primario:hover { background: linear-gradient(180deg, #fb923c, var(--accent)); }
+    .btn-primario:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .btn-secundario {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border);
+    }
+
+    .btn-secundario:hover { background: var(--bg-panel-2); border-color: var(--text-muted); }
+
+    /* ---------- Alertas / estado ---------- */
+    .alerta {
+      margin-top: 0.9rem;
+      padding: 0.7rem 0.9rem;
+      border-radius: 8px;
+      font-size: 0.92rem;
+      border: 1px solid var(--error-border);
+      background: var(--error-bg);
+      color: #fecaca;
+    }
+
+    .alerta[hidden] { display: none; }
+
+    /* ---------- Resultado ---------- */
+    #resultado { margin-top: 1rem; }
+
+    .badge-nivel {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 1.1rem;
+      border-radius: 999px;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.02em;
+    }
+
+    .badge-nivel.nivel-alto  { background: var(--riesgo-alto); }
+    .badge-nivel.nivel-medio { background: var(--riesgo-medio); color: #1c1917; }
+    .badge-nivel.nivel-bajo  { background: var(--riesgo-bajo); }
+
+    .score-bloque { margin-top: 0.8rem; }
+
+    .score-texto {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      margin-bottom: 0.3rem;
+    }
+
+    .score-texto strong { color: var(--text); font-size: 1rem; }
+
+    .score-barra {
+      height: 12px;
+      border-radius: 999px;
+      background: var(--bg-panel-2);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .score-barra .relleno {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--riesgo-bajo), var(--riesgo-medio) 55%, var(--riesgo-alto));
+      transition: width 0.5s ease;
+    }
+
+    .factores { margin: 0.9rem 0 0; padding: 0; list-style: none; }
+
+    .factores li {
+      padding: 0.45rem 0.6rem;
+      margin-bottom: 0.35rem;
+      border-left: 3px solid var(--accent);
+      background: var(--bg-panel-2);
+      border-radius: 0 8px 8px 0;
+      font-size: 0.9rem;
+    }
+
+    .meta-evaluacion {
+      margin: 0.8rem 0 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(26, 11, 2, 0.35);
+      border-top-color: #1a0b02;
+      border-radius: 50%;
+      animation: girar 0.7s linear infinite;
+      vertical-align: -2px;
+      margin-right: 0.4rem;
+    }
+
+    @keyframes girar { to { transform: rotate(360deg); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
+
+    /* ---------- API key ---------- */
+    details.api-key { margin-top: 0.9rem; }
+
+    details.api-key summary {
+      cursor: pointer;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      min-height: 24px;
+    }
+
+    details.api-key[open] summary { margin-bottom: 0.5rem; }
+
+    /* ---------- Footer ---------- */
+    .site-footer {
+      border-top: 1px solid var(--border);
+      padding: 1rem clamp(1rem, 4vw, 2.5rem) 1.4rem;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      text-align: center;
+    }
+
+    .site-footer p { margin: 0.2rem 0; }
+  </style>
+</head>
+<body>
+
+  <header class="site-header">
+    <h1>Sistema de apoyo a la prevención y clasificación de riesgo de incendios forestales en Valparaíso</h1>
+    <p class="subtitulo">Prototipo interactivo — evalúa condiciones atmosféricas y georreferencia el riesgo en el mapa</p>
+  </header>
+
+  <main class="contenedor" id="contenido">
+
+    <!-- ============ Columna izquierda: mapa ============ -->
+    <section class="panel" aria-labelledby="titulo-mapa">
+      <h2 id="titulo-mapa">Mapa de riesgo — Valparaíso</h2>
+      <div id="mapa" role="application" aria-label="Mapa interactivo de Valparaíso. Haz clic para fijar coordenadas de evaluación."></div>
+      <p class="mapa-ayuda">Haz clic en el mapa para fijar latitud y longitud del punto a evaluar.</p>
+      <div class="acciones">
+        <button type="button" id="btn-centrar" class="btn-secundario">Centrar en Valparaíso</button>
+      </div>
+    </section>
+
+    <!-- ============ Columna derecha: formulario + resultado ============ -->
+    <section class="panel" aria-labelledby="titulo-evaluacion">
+      <h2 id="titulo-evaluacion">Evaluación de riesgo</h2>
+
+      <form id="form-riesgo" novalidate>
+        <fieldset>
+          <legend>Condiciones atmosféricas</legend>
+          <div class="campos">
+            <div class="campo">
+              <label for="temperatura_c">Temperatura (°C)</label>
+              <input type="number" id="temperatura_c" name="temperatura_c" min="-10" max="55" step="0.1"
+                     value="28" required inputmode="decimal"
+                     title="Rango válido: -10 a 55 °C (límites del backend)">
+            </div>
+            <div class="campo">
+              <label for="humedad_relativa">Humedad relativa (%)</label>
+              <input type="number" id="humedad_relativa" name="humedad_relativa" min="0" max="100" step="0.1"
+                     value="25" required inputmode="decimal"
+                     title="Rango válido: 0 a 100 % (límites del backend)">
+            </div>
+            <div class="campo ancho">
+              <label for="velocidad_viento_kmh">Velocidad del viento (km/h)</label>
+              <input type="number" id="velocidad_viento_kmh" name="velocidad_viento_kmh" min="0" max="200" step="0.1"
+                     value="35" required inputmode="decimal"
+                     title="Rango válido: 0 a 200 km/h (límites del backend)">
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Ubicación</legend>
+          <div class="campos">
+            <div class="campo">
+              <label for="latitud">Latitud</label>
+              <input type="number" id="latitud" name="latitud" min="-33.5" max="-30" step="0.0001"
+                     value="-33.0472" required inputmode="decimal"
+                     title="Rango válido: -33.5 a -30 (área de Valparaíso, límites del backend)">
+            </div>
+            <div class="campo">
+              <label for="longitud">Longitud</label>
+              <input type="number" id="longitud" name="longitud" min="-72" max="-70" step="0.0001"
+                     value="-71.6127" required inputmode="decimal"
+                     title="Rango válido: -72 a -70 (área de Valparaíso, límites del backend)">
+            </div>
+          </div>
+        </fieldset>
+
+        <div class="acciones">
+          <button type="submit" id="btn-evaluar" class="btn-primario">Evaluar riesgo</button>
+        </div>
+
+        <details class="api-key">
+          <summary>Configuración avanzada: API Key</summary>
+          <div class="campo">
+            <label for="api_key">Clave de acceso (header X-API-Key)</label>
+            <input type="password" id="api_key" name="api_key" value="dev-api-key-123" autocomplete="off">
+          </div>
+        </details>
+      </form>
+
+      <div id="alerta" class="alerta" role="alert" hidden></div>
+
+      <div id="resultado" aria-live="polite" aria-atomic="true">
+        <!-- Resultado inyectado por JS -->
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <p><strong>Prototipo de investigación.</strong> El modelo de clasificación (red CNN/LSTM) está <strong>simulado</strong> con fines de demostración y no reemplaza los servicios oficiales de CONAF, SENAPRED ni la Dirección Meteorológica de Chile.</p>
+    <p>Los niveles de riesgo mostrados no constituyen alertas oficiales. En caso de emergencia llama al 132 (bomberos) o 137 (SENAPRED).</p>
+  </footer>
+
+  <script>
+    "use strict";
+
+    /* ==========================================================
+       Constantes
+       ========================================================== */
+    var API_KEY_DEFECTO = "dev-api-key-123";
+    var ENDPOINT_PREDICT = "/predict";
+
+    var VALPARAISO = { lat: -33.0472, lon: -71.6127, zoom: 11 };
+
+    /* Límites geográficos del área cubierta (iguales a los del backend). */
+    var LIMITES_GEO = { latMin: -33.5, latMax: -30.0, lonMin: -72.0, lonMax: -70.0 };
+
+    var COLORES_NIVEL = {
+      "Alto":  { color: "#dc2626", clase: "nivel-alto",  texto: "#ffffff" },
+      "Medio": { color: "#f59e0b", clase: "nivel-medio", texto: "#1c1917" },
+      "Bajo":  { color: "#16a34a", clase: "nivel-bajo",  texto: "#ffffff" }
+    };
+
+    /* ==========================================================
+       Estado de la aplicación
+       ========================================================== */
+    var mapa = null;
+    var marcadorRiesgo = null;
+
+    /* ==========================================================
+       Utilidades
+       ========================================================== */
+    function $(id) { return document.getElementById(id); }
+
+    function escapeHtml(valor) {
+      return String(valor)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function clamp(min, v, max) {
+      var n = Number(v);
+      if (!isFinite(n)) { n = min; }
+      return Math.min(Math.max(n, min), max);
+    }
+
+    function formatearHora(date) {
+      try {
+        return date.toLocaleString("es-CL", {
+          year: "numeric", month: "2-digit", day: "2-digit",
+          hour: "2-digit", minute: "2-digit", second: "2-digit"
+        });
+      } catch (e) {
+        return date.toISOString();
+      }
+    }
+
+    /* Normaliza el nivel de riesgo devuelto por la API a: Alto | Medio | Bajo */
+    function normalizarNivel(bruto) {
+      var n = String(bruto == null ? "" : bruto).trim().toLowerCase();
+      if (n === "alto" || n === "high" || n === "alta" || n === "2") { return "Alto"; }
+      if (n === "medio" || n === "medium" || n === "moderado" || n === "moderate" || n === "1") { return "Medio"; }
+      if (n === "bajo" || n === "low" || n === "baja" || n === "0") { return "Bajo"; }
+      if (n === "crítico" || n === "critico" || n === "extreme") { return "Alto"; }
+      return null;
+    }
+
+    /* Convierte factores (array u objeto) en una lista de strings legibles */
+    function extraerFactores(data) {
+      var bruto = data.factores_explicativos != null ? data.factores_explicativos
+                : (data.factores != null ? data.factores
+                : (data.factors != null ? data.factors
+                : null));
+      var salida = [];
+      var i;
+
+      if (Array.isArray(bruto)) {
+        for (i = 0; i < bruto.length; i++) {
+          var item = bruto[i];
+          if (item == null) { continue; }
+          if (typeof item === "string" || typeof item === "number") {
+            salida.push(String(item));
+          } else if (typeof item === "object") {
+            var partes = [];
+            for (var k in item) {
+              if (Object.prototype.hasOwnProperty.call(item, k)) {
+                partes.push(k + ": " + String(item[k]));
+              }
+            }
+            if (partes.length > 0) { salida.push(partes.join(" · ")); }
+          }
+        }
+      } else if (bruto && typeof bruto === "object") {
+        for (var clave in bruto) {
+          if (Object.prototype.hasOwnProperty.call(bruto, clave)) {
+            salida.push(clave + ": " + String(bruto[clave]));
+          }
+        }
+      } else if (typeof bruto === "string" && bruto.trim() !== "") {
+        salida.push(bruto.trim());
+      }
+
+      return salida;
+    }
+
+    /* ==========================================================
+       Mapa (Leaflet)
+       ========================================================== */
+    function inicializarMapa() {
+      if (typeof L === "undefined") {
+        $("mapa").innerHTML =
+          '<p style="padding:1rem;color:#94a3b8;">No se pudo cargar Leaflet (¿sin conexión al CDN?). El formulario sigue funcionando.</p>';
+        return;
+      }
+
+      mapa = L.map("mapa", { scrollWheelZoom: false });
+
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> colaboradores'
+      }).addTo(mapa);
+
+      mapa.setView([VALPARAISO.lat, VALPARAISO.lon], VALPARAISO.zoom);
+
+      /* Clic en el mapa → fija latitud/longitud en el formulario */
+      mapa.on("click", function (evento) {
+        var lat = Number(evento.latlng.lat.toFixed(4));
+        var lon = Number(evento.latlng.lng.toFixed(4));
+
+        if (lat < LIMITES_GEO.latMin || lat > LIMITES_GEO.latMax ||
+            lon < LIMITES_GEO.lonMin || lon > LIMITES_GEO.lonMax) {
+          mostrarAlerta(
+            "El punto seleccionado queda fuera del área de Valparaíso " +
+            "(latitud " + LIMITES_GEO.latMin + " a " + LIMITES_GEO.latMax + ", " +
+            "longitud " + LIMITES_GEO.lonMin + " a " + LIMITES_GEO.lonMax + "). " +
+            "Elige un punto dentro del área cubierta."
+          );
+          return;
+        }
+
+        ocultarAlerta();
+        $("latitud").value = lat.toFixed(4);
+        $("longitud").value = lon.toFixed(4);
+      });
+    }
+
+    function centrarEnValparaiso() {
+      if (!mapa) { return; }
+      mapa.setView([VALPARAISO.lat, VALPARAISO.lon], VALPARAISO.zoom);
+      /* El zoom con rueda permanece deshabilitado (scrollWheelZoom: false al crear el mapa). */
+    }
+
+    function marcarResultado(lat, lon, nivel, hora) {
+      if (!mapa || typeof L === "undefined") { return; }
+
+      var meta = COLORES_NIVEL[nivel] || COLORES_NIVEL["Medio"];
+
+      var icono = L.divIcon({
+        className: "",
+        html: '<div style="width:18px;height:18px;border-radius:50%;background:' + meta.color +
+              ';border:3px solid #ffffff;box-shadow:0 0 0 2px rgba(15,23,42,0.6);"></div>',
+        iconSize: [18, 18],
+        iconAnchor: [9, 9]
+      });
+
+      var contenido =
+        '<div class="popup-riesgo">' +
+        "<strong>Riesgo evaluado: <span class=\"nivel\" style=\"color:" + meta.color + ";\">" +
+        escapeHtml(nivel) + "</span></strong>" +
+        "<div>Latitud: " + escapeHtml(lat.toFixed(4)) + "</div>" +
+        "<div>Longitud: " + escapeHtml(lon.toFixed(4)) + "</div>" +
+        "<div>Hora: " + escapeHtml(hora) + "</div>" +
+        "</div>";
+
+      if (marcadorRiesgo) {
+        marcadorRiesgo.setLatLng([lat, lon]);
+        marcadorRiesgo.setIcon(icono);
+        marcadorRiesgo.setPopupContent(contenido);
+      } else {
+        marcadorRiesgo = L.marker([lat, lon], { icon: icono }).addTo(mapa);
+        marcadorRiesgo.bindPopup(contenido);
+      }
+
+      marcadorRiesgo.openPopup();
+      mapa.panTo([lat, lon]);
+    }
+
+    /* ==========================================================
+       UI: alertas y resultado
+       ========================================================== */
+    function mostrarAlerta(mensaje) {
+      var caja = $("alerta");
+      caja.textContent = mensaje;
+      caja.hidden = false;
+    }
+
+    function ocultarAlerta() {
+      var caja = $("alerta");
+      caja.textContent = "";
+      caja.hidden = true;
+    }
+
+    function pintarResultado(data, lat, lon) {
+      var contenedor = $("resultado");
+
+      var nivel = normalizarNivel(
+        data.nivel_riesgo != null ? data.nivel_riesgo
+        : (data.riesgo != null ? data.riesgo
+        : (data.risk_level != null ? data.risk_level : ""))
+      );
+      if (!nivel) { nivel = "Medio"; }
+
+      var scoreCrudo = data.score_riesgo != null ? data.score_riesgo
+                     : (data.score != null ? data.score
+                     : (data.riesgo_score != null ? data.riesgo_score
+                     : (data.probabilidad != null ? data.probabilidad : 0)));
+      var score = clamp(0, scoreCrudo, 100);
+      var meta = COLORES_NIVEL[nivel];
+
+      var factores = extraerFactores(data);
+      var hora = formatearHora(new Date());
+
+      var htmlFactores;
+      if (factores.length > 0) {
+        htmlFactores = '<h3 style="margin:1rem 0 0.4rem;font-size:0.95rem;">Factores explicativos</h3>' +
+                       '<ul class="factores">';
+        for (var i = 0; i < factores.length; i++) {
+          htmlFactores += "<li>" + escapeHtml(factores[i]) + "</li>";
+        }
+        htmlFactores += "</ul>";
+      } else {
+        htmlFactores = '<p class="meta-evaluacion">La respuesta no incluyó factores explicativos detallados.</p>';
+      }
+
+      contenedor.innerHTML =
+        '<div style="margin-top:1rem;">' +
+          '<span class="badge-nivel ' + meta.clase + '">' +
+            "Nivel de riesgo: " + escapeHtml(nivel) +
+          "</span>" +
+        "</div>" +
+        '<div class="score-bloque">' +
+          '<div class="score-texto">' +
+            "<span>Índice de riesgo</span>" +
+            "<strong>" + Math.round(score) + " / 100</strong>" +
+          "</div>" +
+          '<div class="score-barra" role="progressbar" aria-label="Índice de riesgo" ' +
+               'aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.round(score) + '">' +
+            '<div class="relleno" style="width:' + score + '%;"></div>' +
+          "</div>" +
+        "</div>" +
+        htmlFactores +
+        '<p class="meta-evaluacion">Evaluado en ' + escapeHtml(lat.toFixed(4)) + ", " +
+          escapeHtml(lon.toFixed(4)) + " · " + escapeHtml(hora) + "</p>";
+
+      marcarResultado(lat, lon, nivel, hora);
+    }
+
+    function pintarErrorGenerico() {
+      $("resultado").innerHTML =
+        '<p class="meta-evaluacion" style="margin-top:1rem;">Aún no hay una evaluación. Completa los datos y pulsa "Evaluar riesgo".</p>';
+    }
+
+    /* ==========================================================
+       Envío al backend
+       ========================================================== */
+    function leerPayload() {
+      return {
+        temperatura_c: Number($("temperatura_c").value),
+        humedad_relativa: Number($("humedad_relativa").value),
+        velocidad_viento_kmh: Number($("velocidad_viento_kmh").value),
+        latitud: Number($("latitud").value),
+        longitud: Number($("longitud").value)
+      };
+    }
+
+    function setearCargando(cargando) {
+      var btn = $("btn-evaluar");
+      btn.disabled = cargando;
+      if (cargando) {
+        btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>Evaluando\u2026';
+      } else {
+        btn.textContent = "Evaluar riesgo";
+      }
+    }
+
+    async function evaluarRiesgo(evento) {
+      evento.preventDefault();
+      ocultarAlerta();
+
+      var form = $("form-riesgo");
+      if (typeof form.reportValidity === "function" && !form.reportValidity()) {
+        return; /* el navegador ya mostró los mensajes de validación */
+      }
+
+      var payload = leerPayload();
+      var apiKey = ($("api_key").value || "").trim() || API_KEY_DEFECTO;
+
+      setearCargando(true);
+
+      try {
+        var respuesta = await fetch(ENDPOINT_PREDICT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (respuesta.status === 401 || respuesta.status === 403) {
+          mostrarAlerta("API Key inv\u00e1lida o sin permisos. Revisa la clave configurada en \u201cConfiguraci\u00f3n avanzada\u201d.");
+          return;
+        }
+
+        if (respuesta.status === 422) {
+          mostrarAlerta("Datos inv\u00e1lidos: el servidor rechaz\u00f3 los valores enviados. Revisa los campos del formulario (rangos y formatos).");
+          return;
+        }
+
+        if (!respuesta.ok) {
+          mostrarAlerta("Error del servidor (HTTP " + respuesta.status + "). Intenta nuevamente en unos segundos.");
+          return;
+        }
+
+        var data;
+        try {
+          data = await respuesta.json();
+        } catch (e) {
+          mostrarAlerta("El servidor devolvi\u00f3 una respuesta que no se pudo interpretar. Intenta nuevamente.");
+          return;
+        }
+
+        pintarResultado(data, payload.latitud, payload.longitud);
+
+      } catch (error) {
+        var esRed = (error && (error.name === "TypeError" || /fetch|network|load/i.test(String(error.message))));
+        if (esRed) {
+          mostrarAlerta("No se pudo conectar con el servidor de predicci\u00f3n. Verifica tu conexi\u00f3n o que el servicio est\u00e9 activo e int\u00e9ntalo de nuevo.");
+        } else {
+          mostrarAlerta("Ocurri\u00f3 un error inesperado al evaluar el riesgo. Intenta nuevamente.");
+        }
+      } finally {
+        setearCargando(false);
+      }
+    }
+
+    /* ==========================================================
+       Arranque
+       ========================================================== */
+    function init() {
+      $("form-riesgo").addEventListener("submit", evaluarRiesgo);
+      $("btn-centrar").addEventListener("click", centrarEnValparaiso);
+      inicializarMapa();
+      pintarErrorGenerico();
+    }
+
+    /* Leaflet carga con defer: esperar al DOM + libs externas */
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () {
+        /* Si Leaflet aún no llegó, reintentamos brevemente */
+        if (typeof L !== "undefined") {
+          init();
+        } else {
+          var intentos = 0;
+          var espera = setInterval(function () {
+            intentos += 1;
+            if (typeof L !== "undefined" || intentos >= 20) {
+              clearInterval(espera);
+              init();
+            }
+          }, 100);
+        }
+      });
+    } else {
+      init();
+    }
+  </script>
+</body>
+</html>
